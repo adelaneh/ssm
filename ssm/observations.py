@@ -19,7 +19,7 @@ class Observations(object):
     # K = number of discrete states
     # D = number of observed dimensions
     # M = exogenous input dimensions (the inputs modulate the probability of discrete state transitions via a multiclass logistic regression)
-    
+
     def __init__(self, K, D, M=0):
         self.K, self.D, self.M = K, D, M
 
@@ -196,7 +196,7 @@ class ExponentialObservations(Observations):
         weights = np.concatenate([Ez for Ez, _, _ in expectations])
         for k in range(self.K):
             self.log_lambdas[k] = -np.log(np.average(x, axis=0, weights=weights[:,k]) + 1e-16)
-                
+
     def smooth(self, expectations, data, input, tag):
         """
         Compute the mean observation under the posterior distribution
@@ -1026,6 +1026,65 @@ class AutoRegressiveObservationsNoInput(AutoRegressiveObservations):
             __init__(K, D, M=0, lags=lags,
                      l2_penalty_A=l2_penalty_A,
                      l2_penalty_b=l2_penalty_b)
+
+
+class AutoRegressiveRotationalObservations(AutoRegressiveObservationsNoInput):
+    """
+    AutoRegressive observation model where the matrix A is constrained to be orthogonal.
+    As a result of this constraint, we do an approximate M-Step which assumes noise
+    covariance to be identity.
+
+    This is intended for use as the dynamics of a rotational LDS, in order to create
+    a probabilistic version of jPCA.
+
+    The original formulation of jPCA is from Churchland et al 2012:
+    https://www.nature.com/articles/nature11129.
+
+    NOTE: For now, this uses a simple rotational dynamical system with no inputs and no offset vector.
+          x_{t+1} = Ax_t + noise.
+    """
+    def __init__(self, K, D, M=0, lags=1,
+                 l2_penalty_A=0,
+                 l2_penalty_b=1e-8):
+        assert K == 1, "K must be 1. This observation model is undefined for switching LDS."
+        assert lags == 1, "Lags must be 1. This observation model is undefined otherwise."
+        assert l2_penalty_A == 0, "Found l2_penalty_A not equal to zero. Cannot regularize A update " \
+                                  "when A is constrained to be a rotation matrix."
+        assert M == 0, "This model does not support inputs."
+        super(AutoRegressiveRotationalObservations, self).\
+            __init__(K, D, M=0, lags=lags,
+                     l2_penalty_A=l2_penalty_A,
+                     l2_penalty_b=l2_penalty_b)
+        self.As[0] = random_rotation(D)
+
+    def m_step(self, expectations, datas, inputs, masks, tags, J0=None, h0=None):
+        """Simplified m_step for orthogonal dynamics matrix
+
+        We only consider the case where K=1, lags=1, which simplifies some of the m-step
+        calculations. We don't allow an l2 penalty on the A-update, since we already have
+        the orthogonality constraint.
+        """
+        K, D, M, lags = self.K, self.D, self.M, self.lags
+
+        expected_ss = np.zeros((D, D))
+        for (data, mask) in zip(datas, masks):
+            # Only use data if it is complete
+            if not np.all(mask):
+                raise Exception("Encountered missing data in AutoRegressiveObservations!")
+
+            expected_ss += (data.T)[:, :-1] @ data[1:, :]
+
+        # The M-Step for the A matrix is modified so that it remains a rotation
+        # matrix during the update. For the purposes of this step, we are
+        # assuming identity covariance, which amounts to solving an instance of
+        # the Orthogonal Procrustes Problem. The solution is given by the SVD of
+        # the expected sufficient statistics -- see 2006 PhD thesis by Thomas
+        # Viklands for more info: https://people.cs.umu.se/viklands/PhD.pdf
+        U, _, Vt = np.linalg.svd(expected_ss)
+        c = np.ones(D)
+        c[-1] = np.linalg.det(U @ Vt)
+        self.As[0] = U @ np.diag(c) @ Vt
+        assert np.allclose(self.As[0].T @ self.As[0], np.eye(D))
 
 
 class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):

@@ -904,6 +904,7 @@ class LDS(SLDS):
             studentst=obs.RobustAutoRegressiveObservations,
             diagonal_t=obs.RobustAutoRegressiveDiagonalNoiseObservations,
             diagonal_studentst=obs.RobustAutoRegressiveDiagonalNoiseObservations,
+            rotational=obs.AutoRegressiveRotationalObservations
             )
 
         if isinstance(dynamics, str):
