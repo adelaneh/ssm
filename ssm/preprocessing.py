@@ -162,3 +162,41 @@ def standardize(data, mask):
     assert np.all(np.isfinite(y))
     return y
 
+def jPCA_project(data, rotation_matrix, num_components=2):
+    """
+    Project data into dimensions which capture rotations.
+    We assume that rotation_matrix is an orthogonal matrix which was found
+    by fitting a rotational LDS to data (e.g via setting dynamics="rotational").
+    This function then projects on the top eigenvectors of this rotation matrix.
+
+    Args
+    ----
+    data: T x D array of data points (often pre-processed by PCA)
+    rotation_matrix: D x D rotation matrix
+    num_components: number of components to use for projection (default is 2)
+
+    Returns
+    -------
+    out: T x num_components project of the data, which should capture rotations
+    """
+    D, _ = rotation_matrix.shape
+    assert np.allclose(rotation_matrix.T @ rotation_matrix, np.eye(D)), \
+        "rotation_matrix needs to be a matrix with orthonormal columns."
+    assert num_components % 2 == 0, "num_components needs to be even."
+    assert num_components < D, "num_components must be less than " \
+        "data dim."
+
+    # Eigenvalues are not necessarily sorted
+    eigvals, eigvecs = np.linalg.eig(rotation_matrix)
+    idx = np.argsort(eigvals)
+    eigvecs = eigvecs[:, idx]
+
+    jpca_basis = np.zeros((D, num_components))
+    for k in range(0, num_components, 2):
+        v1 = eigvecs[:, k] + eigvecs[:, k+1]
+        v2 = -np.imag(eigvecs[:, k] - eigvecs[:, k+1])
+        jpca_basis[:, k] = v1
+        jpca_basis[:, k+1] = v2
+
+    out = data @ jpca_basis
+    return out
