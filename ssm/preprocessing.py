@@ -162,7 +162,8 @@ def standardize(data, mask):
     assert np.all(np.isfinite(y))
     return y
 
-def jPCA_project(data, rotation_matrix, num_components=2):
+
+def jPCA_project(mean_states, rotation_matrix, num_components=2):
     """
     Project data into dimensions which capture rotations.
     We assume that rotation_matrix is an orthogonal matrix which was found
@@ -180,23 +181,52 @@ def jPCA_project(data, rotation_matrix, num_components=2):
     out: T x num_components project of the data, which should capture rotations
     """
     D, _ = rotation_matrix.shape
-    assert np.allclose(rotation_matrix.T @ rotation_matrix, np.eye(D)), \
-        "rotation_matrix needs to be a matrix with orthonormal columns."
     assert num_components % 2 == 0, "num_components needs to be even."
-    assert num_components < D, "num_components must be less than " \
+    assert num_components <= D, "num_components must be less than " \
         "data dim."
 
     # Eigenvalues are not necessarily sorted
     eigvals, eigvecs = np.linalg.eig(rotation_matrix)
-    idx = np.argsort(eigvals)
+    idx = np.argsort(np.abs(np.imag(eigvals)))[::-1]
     eigvecs = eigvecs[:, idx]
+    eigvals = eigvals[idx]
 
     jpca_basis = np.zeros((D, num_components))
     for k in range(0, num_components, 2):
-        v1 = eigvecs[:, k] + eigvecs[:, k+1]
-        v2 = -np.imag(eigvecs[:, k] - eigvecs[:, k+1])
-        jpca_basis[:, k] = v1
-        jpca_basis[:, k+1] = v2
+        # One eigenvalue will have negative imaginary component,
+        # the other will have positive imaginary component.
+        if np.imag(eigvals[k]) > 0:
+            v1 = eigvecs[:, k] + eigvecs[:, k+1]
+            v2 = -np.imag(eigvecs[:, k] - eigvecs[:, k+1])
+        else:
+            v1 = eigvecs[:, k] + eigvecs[:, k+1]
+            v2 = -np.imag(eigvecs[:, k+1] - eigvecs[:, k])
 
-    out = data @ jpca_basis
+        V = np.real(np.column_stack((v1, v2))) / np.sqrt(2)
+
+        # Adapted from jPCA Matlab code:
+        # Rotate bases so that the rotations are vertical
+        test_proj = mean_states[0] @ V
+        pca = PCA(2)
+        pca = pca.fit(test_proj)
+        rotv = pca.components_
+
+        pc1 = np.append(rotv[:,0],0)
+        pc2 = np.append(rotv[:, 1], 0)
+        cross = np.cross(pc1, pc2)
+        if cross[2] > 0:
+            rotv[:, 1] = -rotv[:, 1]
+        V = V @ rotv
+        test_proj = mean_states[0] @ V
+
+        # Adapted from jPCA matlab code
+        # so that plots are consistent. 
+        if np.max(np.abs(test_proj[:, 1])) > np.max(test_proj[:, 1]):
+            V = -V
+
+        jpca_basis[:, k:k+2] = V
+
+    out = []
+    for state in mean_states:
+        out.append(state @ jpca_basis)
     return out

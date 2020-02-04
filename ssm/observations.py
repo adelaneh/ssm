@@ -1056,11 +1056,19 @@ class AutoRegressiveRotationalObservations(AutoRegressiveObservationsNoInput):
                      l2_penalty_A=l2_penalty_A,
                      l2_penalty_b=l2_penalty_b)
 
+    def initialize(self, datas, inputs=None, masks=None, tags=None):
+        super(AutoRegressiveRotationalObservations, self).\
+            initialize(datas, inputs=None, masks=None, tags=None)
+
+        D = self.D        
         # Project the initialized A matrix to the set of orthogonal matrices
         U, _, Vt = np.linalg.svd(self.As[0])
         c = np.ones(D)
         c[-1] = np.linalg.det(U @ Vt)
         self.As[0] = U @ np.diag(c) @ Vt
+
+        # For now, we only support identity noise Covariance
+        self.Sigmas = np.eye(D)[None, :, :]
 
     def m_step(self, expectations, datas, inputs, masks, tags, J0=None, h0=None):
         """Simplified m_step for orthogonal dynamics matrix
@@ -1091,14 +1099,14 @@ class AutoRegressiveRotationalObservations(AutoRegressiveObservationsNoInput):
         self.As[0] = U @ np.diag(c) @ Vt
         assert np.allclose(self.As[0].T @ self.As[0], np.eye(D))
 
-        # Update the covariance
-        sqerr = np.zeros((D, D))
-        weight = 1e-8 * np.ones(K)
-        for data in datas:
-            yhat = data @ self.As[0].T
-            resid = yhat[:-1] - data[1:]
-            sqerr += resid.T @ resid
-        Sigmas = (sqerr / len(datas) + 1e-8 * np.eye(D))[:, None]
+        # # Update the covariance
+        # sqerr = np.zeros((D, D))
+        # weight = 1e-8 * np.ones(K)
+        # for data in datas:
+        #     yhat = data @ self.As[0].T
+        #     resid = yhat[:-1] - data[1:]
+        #     sqerr += resid.T @ resid
+        # Sigmas = (sqerr / len(datas) + 1e-8 * np.eye(D))[:, None]
 
 
 class AutoRegressiveDiagonalNoiseObservations(AutoRegressiveObservations):
